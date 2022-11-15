@@ -1,0 +1,145 @@
+create database db1;
+create schema dbs1;
+create warehouse pr1;
+use warehouse pr1;
+
+create database others;
+
+use others;
+
+/// step one, creating a new database to keep things stored seperately and stay organized a bit.
+/// creating a new integration object to grant access of snowflake to s3 bucket via external id and aws arn
+create or replace storage integration project
+TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'S3'
+  ENABLED = TRUE 
+  STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::565909438637:role/snowflake_access_role'
+  STORAGE_ALLOWED_LOCATIONS = ('s3://biv3sprint1/group2/')
+   COMMENT = 'This is for the sprint completion'
+   
+/// taking the description of integration object
+desc integration project;
+
+/// now we create an empty table to facilitate the data movement and loading
+show databases;
+
+use DB1;
+show schemas;
+drop table DB1.DBS1.diseases;
+/// step two
+create or replace table DB1.DBS1.diseases
+(
+HEARTDISEASE string, 
+BMI float, 
+SMOKING string, 
+ALCOHOLDRINKING string, 
+STROKE string, 
+PHYSICALHEALTH float, 
+MENTALHEALTH float,
+DIFFWALKING string, 
+SEX string, 
+AGECATEGORY string, 
+RACE string, 
+DIABETIC string, 
+PHYSICALACTIVITY string, 
+GENHEALTH string, 
+SLEEPTIME int, 
+ASTHMA string, 
+KIDNEYDISEASE string, 
+SKINCANCER string
+);
+
+
+/// step three
+/// now we create a schema inside the new database as others
+/// in the new database and schema we will create, we will place the format in that database and scema
+
+show databases;
+use others;
+create schema othersschema;
+
+CREATE OR REPLACE file format OTHERS.OTHERSSCHEMA.csv_fileformat
+    type = csv
+    field_delimiter = ','
+    skip_header = 1
+    null_if = ('NULL','null')
+    empty_field_as_null = TRUE;
+    
+/// step four
+/// creating another schema as othersschemaformat for creating a stage in it
+create schema others_schema_stage;
+    
+CREATE OR REPLACE stage OTHERS.OTHERS_SCHEMA_STAGE.csv_folder
+    URL = 's3://biv3sprint1/group2/'
+    STORAGE_INTEGRATION = project
+    FILE_FORMAT = OTHERS.OTHERSSCHEMA.csv_fileformat;
+  
+  
+list @OTHERS.OTHERS_SCHEMA_STAGE.csv_folder;
+
+///ran selection command to ensure that it was empty and loaded after pipeline was created
+select count(*) from DB1.DBS1.DISEASES;
+
+/// gave empty set
+
+/// this is to seprate the commands
+/// step five
+/// creating the copy to command
+/// creating the schema to create pipes
+create schema OTHERS.OTHERS_SCHEMA_PIPES;
+
+CREATE OR REPLACE pipe DB1.DBS1.diseases_pipe
+auto_ingest = TRUE
+AS
+COPY INTO DB1.DBS1.DISEASES
+FROM @OTHERS.OTHERS_SCHEMA_STAGE.CSV_FOLDER;
+
+/// sprint sql queries for questions:
+
+/// Question 1
+/// which gender have majority heart attack
+select sex, count(*) from DB1.DBS1.DISEASES where HEARTDISEASE = 'Yes' group by sex order by count(*) desc;
+
+
+select * from DB1.DBS1.DISEASES;
+
+
+/// Question 2
+/// Average Age at which people generally gets heart attack
+select AVG(CAST(SUBSTR(AGECATEGORY ,1,2) AS INT )) from DB1.DBS1.DISEASES
+group by heartdisease
+having heartdisease = 'Yes';
+
+/// Question 3
+/// which combination of physical and mental health causes stroke
+select PHYSICALHEALTH, MENTALHEALTH, count(*) from DB1.DBS1.DISEASES where stroke = 'Yes'
+group by (PHYSICALHEALTH, MENTALHEALTH);
+
+/// Question 4
+/// GenHealth wise average BMI of people
+select GENHEALTH ,avg(BMI) from DB1.DBS1.DISEASES
+group by GENHEALTH;
+
+/// Question 5
+/// Average age of people having problem in walking
+select avg(cast(substring(AGECATEGORY,1,2) AS INT))
+from DB1.DBS1.DISEASES where DIFFWALKING = 'Yes';
+
+/// Question 6
+/// Count the different combination of people having heart-attack against BMI,Smoking,AlcoholDrink,Stroke,Diabetic,Kidney Diseases,skin cancer
+SELECT COUNT(*) COMBINATION,BMI,SMOKING,ALCOHOLDRINKING,STROKE,DIABETIC,KIDNEYDISEASE,SKINCANCER
+FROM DB1.DBS1.DISEASES
+WHERE HEARTDISEASE = 'Yes'
+GROUP BY BMI,SMOKING,ALCOHOLDRINKING,STROKE,DIABETIC,KIDNEYDISEASE,SKINCANCER;
+
+
+/// Question 7
+/// Average BMI of people having Skin Cancer
+select avg(BMI) from DB1.DBS1.DISEASES
+where skincancer = 'Yes';
+
+/// Question 8
+/// Possibilities/Percentage of people having both Heart Diseases stroke and Skin Cancer
+select round((count(*)/(select count(*) from DB1.DBS1.DISEASES))*100,2) as percentage
+from DB1.DBS1.DISEASES
+where heartdisease='Yes' and stroke='TRUE' and skincancer='TRUE';
